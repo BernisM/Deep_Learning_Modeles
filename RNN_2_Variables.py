@@ -8,48 +8,15 @@ import pandas as pd
 ######################### PARTIE 1 - PREPARATION DES DONNEES
 
 # JEU D'ENTRAINEMENT
-dataset_train = pd.read_csv("Google_Stock_Price_Train.csv")
-training_set = dataset_train.iloc[:,1:3].values
+dataset_train = pd.read_csv("BNP_Stock_Price_Train.csv")
+training_set = dataset_train[['Close BNPP','Close CAC40','Beta']].values
 
-# FEATURE MEANING --> changer l'échelle 
-# Standardisation = retirer la moyenne à chaque valeur / Std Dev
-# Normalisation = Retirer la valeur minimum à toute les valeurs / (valeur max - valeur min)
-from sklearn.preprocessing import MinMaxScaler
-sc = MinMaxScaler(feature_range=(0,1))
-training_set_scaled = sc.fit_transform(training_set)
+BNP_Stock = dataset_train[['Close BNPP']].values
+CAC40_Stock = dataset_train[['Close CAC40']].values
+Beta = dataset_train[['Beta']].values
 
-# Création de la structure avec 60 timesteps (60 derniers jours --> 3 derniers mois) et 1 sortie
-y_train = []
-#Incrémentation de la liste des 60 timesteps et 1 sortie
-for i in range(60,1258):
-    y_train.append(training_set_scaled[i,0])
-#Tranformation liste en Array pour Keras
-y_train = np.array(y_train)
-
-# Création de la structure avec 60 timesteps et 2 variables
-# boucle pour chaque variable, et chaque variable va 
-# être un np.array  à 2 dimensions, et je vais append les np.array dans X_train :
-X_train = []
-for variable in range(0, 2):
-    X = []
-    for i in range(60, 1258):
-        X.append(training_set_scaled[i-60:i, variable])
-    X, np.array(X)
-    X_train.append(X)
-X_train, np.array(X_train)
-print(np.array(X_train).shape)
-
-# Reshaping axes (3ème dimension en 1ème position au lieu de la 3ème)
-X_train = np.swapaxes(np.swapaxes(X_train, 0, 1), 1, 2)
-
-# Reshaping (Ajouter une dimention)
-# Batch-size = nombre de ligne/jours 
-# timesteps = nombre de colonnes
-# Input_dim = valeurs d'entrée (nombre de variable)
-X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
-
-print((X_train.shape[0], X_train.shape[1], 1))
-
+dataset_test = pd.read_csv("BNP_Stock_Price_Test.csv")
+testing_set = dataset_test[['Close BNPP','Close CAC40','Beta']].values
 
 ######################### PARTIE 2 - CONSTRUCTION DU RNN
 from keras.models import Sequential
@@ -60,12 +27,31 @@ from tensorflow import *
 # Initialiser le Réseau
 regressor = tf.keras.models.Sequential()
 
+# Création de la structure avec 60 timesteps (60 derniers jours --> 3 derniers mois) et 1 sortie
+y_train = []
+#Incrémentation de la liste des 60 timesteps et 1 sortie
+for i in range(120,7615):
+    y_train.append(training_set[i,0])
+y_train = np.array(y_train)
+
+x_train = []
+for j in range(0,3):
+    X = [] # initialisation de l'array X
+    for x in range(120, 7615):
+        X.append(training_set[x-120:x,j])
+    X, np.array(X)
+    x_train.append(X)
+x_train, np.array(x_train)
+
+# 3ème dimension en 1ère position (3, 7495, 120) -->  (7495, 120, 3)
+x_train = np.swapaxes(np.swapaxes(x_train,0,1),1,2)
+
 # 1ère couche LSTM + dropout
 # units = nb neurones pour cette couche
 # return_sequences = empiler couches de LSTM (meilleurs prédiction)
 # input_shape = nombre de jours observés
-regressor.add(LSTM(units=50,return_sequences=True, 
-                   input_shape=(X_train.shape[1], 1)))
+regressor.add(LSTM(units=30,return_sequences=True, 
+                   input_shape=(x_train.shape[1], 1)))
 regressor.add(Dropout(0.2))
 
 # 2ème couche LSTM + dropout
@@ -89,28 +75,57 @@ regressor.add(Dense(units=1))
 regressor.compile(optimizer="adam",loss="mean_squared_error")
 
 # Entrainer le réseau
-regressor.fit(X_train, y_train, epochs=110, batch_size=32)
+# batch_size = taille du lot (ici 32 observations) --> Ajustement des poids après un lot d'observation
+regressor.fit(x_train, y_train, epochs=100, batch_size=32)
+
+regressor.save("StockBNP.h5")
 
 ######################### PARTIE 3 - PREDICTIONS ET VISUALISATION
 
-# Données de 2017
-dataset_test = pd.read_csv("Google_Stock_Price_Test.csv")
-real_stock_price = dataset_test[["Open"]].values
+from sklearn.preprocessing import StandardScaler
+sc = StandardScaler()
 
-# Predictions pour 2017
+# Predictions
 # --> Concaténer le jeu d'entrainement original (dataset_train) et le jeu de test 
-dataset_total = pd.concat((dataset_train["Open"],dataset_test["Open"]),axis=0)
+dataset_total = pd.concat((dataset_train[['Close BNPP','Close CAC40','Beta']],dataset_test[['Close BNPP','Close CAC40','Beta']]),axis=0)
 
 # Changement d'echelle que sur les entrées et pas sur le jeu de test
-inputs = dataset_total[len(dataset_total) - len(dataset_test) - 60:].values
+inputs = dataset_total[len(dataset_total) - len(dataset_test) - 120:].values
 inputs = inputs.reshape(-1,1)
-inputs = sc.transform(inputs)
+
+X_test = []
+for variable in range(0, 3):
+    X = []
+    for i in range(120,240):
+        X.append(testing_set[i-120:i, variable])
+    X, np.array(X)
+    X_test.append(X)
+X_test, np.array(X_test)
+
+print(np.array(X_test).shape)
+
+print(X_test[1][6][1])
+
+X_test = np.swapaxes(np.swapaxes(X_test, 0, 1), 1, 2)
+
+# prediction + retour vers les vrais valeurs et non plus (0,1)
+predicted_stock_price = regressor.predict(X_test)
+
+
+print(predicted_stock_price[:])
+
+inputs_like = np.zeros(shape=(len(predicted_stock_price),3))
+
+inputs_like = np.reshape(input,)
+predicted_stock_price = sc.fit_transform(inputs_like)[:,0]
+
+print(predicted_stock_price[19])
 
 # Création de la structure avec 60 timesteps (60 derniers jours --> 3 derniers mois) et 1 sortie
 X_test = []
 #Incrémentation de la liste des 60 timesteps et 1 sortie
-for i in range(60,80):
-    X_test.append(inputs[i-60:i,0]) #60 valeurs entre auj jusqu'à il y a 60 jours
+for i in range(120,140):
+    X_test.append(inputs[i-120:i,0]) #60 valeurs entre auj jusqu'à il y a 60 jours
 #Tranformation liste en Array pour Keras
 X_test = np.array(X_test)
 # Input_dim = valeurs d'entrée (nombre de variable)
@@ -118,6 +133,8 @@ X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
 
 # Prediction des valeurs
 predicted_stock_price = regressor.predict(X_test)
+
+
 # Transformation inverse valeurs <> 0 & 1
 predicted_stock_price = sc.inverse_transform(predicted_stock_price)
 
