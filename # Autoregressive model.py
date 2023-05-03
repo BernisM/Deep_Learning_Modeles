@@ -75,4 +75,6 @@ while len(validation_predictions) < len(validation_target):
 plt.plot(validation_target,label='forecast target')
 plt.plot(validation_predictions, label='forecast predictions')
 plt.legend()
-plt.show()
+plt.show() 
+
+save
